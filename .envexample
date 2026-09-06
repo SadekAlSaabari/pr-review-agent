@@ -1,0 +1,6 @@
+MODEL="gpt-4.1-mini"
+OPENAI_API_KEY=""
+OPENAI_BASE_URL="https://api.openai.com/v1"
+
+GITHUB_TOKEN=""
+GITHUB_REPO_URL=""
