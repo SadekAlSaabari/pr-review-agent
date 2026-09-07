@@ -6,17 +6,19 @@ import asyncio
 from llama_index.core.agent.workflow import AgentOutput, ToolCallResult, ReActAgent
 from llama_index.core.prompts import RichPromptTemplate
 from typing import Any
+import sys
 
 dotenv.load_dotenv()
 
 # Retrieve environment variables and GitHub repo information
 git = Github(os.getenv("GITHUB_TOKEN")) if os.getenv("GITHUB_TOKEN") else None
 repo_url = os.getenv("GITHUB_REPO_URL")
-repo_name = repo_url.split('/')[-1].replace('.git', '')
-username = repo_url.split('/')[-2]
-full_repo_name = f"{username}/{repo_name}"
-if git is not None:
-    repo = git.get_repo(full_repo_name)
+if repo_url is not None:
+    repo_name = repo_url.split('/')[-1].replace('.git', '')
+    username = repo_url.split('/')[-2]
+    full_repo_name = f"{username}/{repo_name}"
+    if git is not None:
+        repo = git.get_repo(full_repo_name)
 
 instruc = """You are the context gathering agent. When gathering context, you MUST gather: 
     - The details: author, title, body, diff_url, state, and head_sha;
@@ -51,7 +53,14 @@ def get_pull_request_details(PR_number: int):
 def get_files(file_path: str):
     """retrieves the contents of a file from the repo in text format,
     given that you provide the file path as a string"""
-    return repo.get_contents(file_path).decoded_content.decode("utf-8")
+    contents = repo.get_contents(file_path)
+    if isinstance(contents, list):
+        files_collection = []
+        for item in contents:
+            files_collection.append(item.decoded_content.decode("utf-8"))
+        return files_collection
+    else:
+        return contents.decoded_content.decode("utf-8")
 
 
 # PR commits details tool - gets an SHA, retrieves info about commit
@@ -98,4 +107,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    git.close()
+    if git is not None:
+        git.close()
+    sys.exit()
