@@ -43,7 +43,21 @@ Ensure to do the following for a thorough review:
     - Which lines could be improved upon? Quote these lines and offer suggestions the author could implement.
  - If you need any additional details, you must hand off to the Context Agent.
  - You should directly address the author. So your comments should sound like:
- 'Thanks for fixing this. I think all places where we call quote should be fixed. Can you roll this fix out everywhere?'"""
+ 'Thanks for fixing this. I think all places where we call quote should be fixed. Can you roll this fix out everywhere?'
+
+ - You must hand off to the ReviewAndPostingAgent once you are done drafting a review."""
+
+review_post_instruc = """You are the Review and Posting agent. You must use the CommentorAgent to create a review comment. 
+Once a review is generated, you need to run a final check and post it to GitHub.
+   - The review must:
+   - Be a ~200-300 word review in markdown format.
+   - Specify what is good about the PR:
+   - Did the author follow ALL contribution rules? What is missing?
+   - Are there notes on test availability for new functionality? If there are new models, are there migrations for them?
+   - Are there notes on whether new endpoints were documented?
+   - Are there suggestions on which lines could be improved upon? Are these lines quoted?
+ If the review does not meet this criteria, you must ask the CommentorAgent to rewrite and address these concerns.
+ When you are satisfied, post the review to GitHub.  """
 
 # --- LLM details ---
 llm = OpenAI(
@@ -56,10 +70,10 @@ llm = OpenAI(
 # --- AI agent tools ---
 
 # get PR request details including author, title, body, state and SHAs
-def get_pull_request_details(PR_number: int):
+def get_pull_request_details(pr_number: int):
     """PR details tool - returns details about the PR given the number
     including PR author, PR title, PR body, diff URL, PR state, and commit SHAs"""
-    pull_request = repo.get_pull(PR_number)
+    pull_request = repo.get_pull(pr_number)
     pr_details = {
         "author": pull_request.user.login,
         "title": pull_request.title,
@@ -130,12 +144,24 @@ async def update_gathered_contexts(context_summary: str):
     await ctx.store.set("gathered_contexts", context_summary)
 
 
-## adding comment to context tool - takes a draft comment and adds it to the persistent context of the application
+# adding comment to context tool - takes a draft comment and adds it to the persistent context of the application
 async def add_comment_to_state(draft_comment: str):
     """takes a draft comment and adds it to the persistent context of the application along with the current context"""
     current_state = await ctx.store.get("state")
     current_state["draft_comment"] = draft_comment
     await ctx.store.set("state", current_state)
+
+
+# adding final comment to context tool - takes a finalised comment and saves it to the context of the application
+async def add_final_review_to_state(final_comment: str):
+    """Takes a final comment and adds it to the context of the application"""
+    await ctx.store.set("final_review", final_comment)
+
+
+def post_to_github(pr_number: int, final_comment: str):
+    """Takes a finalised comment (which can be retrieved from the final_review section of the Context) and submits it as a comment for the specified pull request on the GitHub repository"""
+    pull_request = repo.get_pull(pr_number)
+    pull_request.create_review(body=final_comment)
 
 
 #  --- defining agents ---
@@ -156,15 +182,24 @@ commentor_agent = FunctionAgent(
     description="Uses context gathered by the context agent to draft a pull review comment.",
     tools=[add_comment_to_state],
     system_prompt=comment_instruc,
-    can_handoff_to=["ContextAgent"]
+    can_handoff_to=["ContextAgent", "ReviewAndPostingAgent"]
+)
+
+review_posting_agent = FunctionAgent(
+    llm=llm,
+    name="ReviewAndPostingAgent",
+    description="takes a draft pull request review comment from the commentor agent and either sends it back for rewriting, or posts it on GitHub.",
+    tools=[add_final_review_to_state, post_to_github],
+    can_handoff_to=["CommentorAgent"]
 )
 
 workflow_agent = AgentWorkflow(
-    agents=[context_agent, commentor_agent],
+    agents=[context_agent, commentor_agent, review_posting_agent],
     root_agent=commentor_agent.name,
     initial_state={
         "gathered_contexts": "",
-        "draft_comment": ""
+        "draft_comment": "",
+        "final_review": ""
     },
 )
 
