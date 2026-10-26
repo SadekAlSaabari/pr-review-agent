@@ -61,7 +61,7 @@ Once a review is generated, you need to run a final check and post it to GitHub.
 
 # --- LLM details ---
 llm = OpenAI(
-    model=os.getenv("OPENAI_MODEL"),
+    model=os.getenv("OPENAI_MODEL", "gpt-5.4-mini-2026-03-17"),
     api_key=os.getenv("OPENAI_API_KEY"),
     api_base=os.getenv("OPENAI_BASE_URL"),
 )
