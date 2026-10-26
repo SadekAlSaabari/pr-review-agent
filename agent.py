@@ -241,7 +241,7 @@ async def main():
         elif isinstance(event, ToolCall):
             print(f"Calling selected tool: {event.tool_name}, with arguments: {event.tool_kwargs}")
     state = await ctx.store.get("state")
-    print(state["draft_comment"])
+    print(state["final_review"])
 
 
 if __name__ == "__main__":
