@@ -10,7 +10,7 @@ pip install llama-index openai PyGithub python-dotenv
 2. Create a .env from .envexample and set values:
 - OPENAI_API_KEY
 - (optional) OPENAI_BASE_URL
-- MODEL (defaults in .envexample)
+- OPENAI_MODEL (defaults in .envexample)
 - GITHUB_TOKEN
 - GITHUB_REPO_URL (e.g., https://github.com/owner/repo.git)
 3. Run:
