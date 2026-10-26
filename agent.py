@@ -26,7 +26,7 @@ if repo_url is not None:
 # --- System prompts for agents ---
 context_instruc = """You are the context gathering agent. When gathering context, you MUST:
   - Gather PR details: author, title, body, diff_url, state, and head_sha
-  - Get changed files from the commit using the get_commit_details tool
+  - Get changed files and patches for the entire pull request using the get_pull_request_changes tool with the PR number
   - Any requested for files
   - Generate a concise summary of the pull request using the generate_pr_summary tool
   - Store the summary in the gathered_contexts field using the update_gathered_contexts tool
@@ -98,12 +98,12 @@ def get_files(file_path: str):
         return contents.decoded_content.decode("utf-8")
 
 
-# PR commits details tool - gets an SHA, retrieves info about commit like file changes, and returns that information
-def get_commit_details(head_sha: str):
-    """retrieves details of a commit, given that you provide the SHA for it. details include file name, status, additions, deletions, changes and patches"""
-    commit = repo.get_commit(head_sha)
+# PR changes tool - retrieves file changes across the entire pull request
+def get_pull_request_changes(pr_number: int):
+    """Retrieves file names, statuses, additions, deletions, changes and patches for the entire pull request given its number."""
+    pull_request = repo.get_pull(pr_number)
     changed_files: list[dict[str, Any]] = []
-    for f in commit.files:
+    for f in pull_request.get_files():
         changed_files.append({
             "filename": f.filename,
             "status": f.status,
@@ -181,7 +181,7 @@ context_agent = FunctionAgent(
     llm=llm,
     name="ContextAgent",
     description="uses the GitHub API to retrieve information about pull requests",
-    tools=[get_pull_request_details, get_files, get_commit_details, generate_pr_summary, update_gathered_contexts],
+    tools=[get_pull_request_details, get_files, get_pull_request_changes, generate_pr_summary, update_gathered_contexts],
     system_prompt=context_instruc,
     can_handoff_to=["CommentorAgent"]
 )
