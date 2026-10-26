@@ -66,7 +66,6 @@ llm = OpenAI(
     api_base=os.getenv("OPENAI_BASE_URL"),
 )
 
-
 # --- AI agent tools ---
 
 # get PR request details including author, title, body, state and SHAs
@@ -139,29 +138,42 @@ def generate_pr_summary(pr_details: dict[str, Any], changed_files: list[dict[str
 
 
 # update gathered contexts tool - takes the summary generated and saves it to the application context
-async def update_gathered_contexts(context_summary: str):
-    """Updates the gathered_contexts field in the workflow's initial state."""
-    await ctx.store.set("gathered_contexts", context_summary)
+async def update_gathered_contexts(ctx: Context, context_summary: str) -> str:
+    """Save the PR summary for the other agents."""
+    async with ctx.store.edit_state() as store:
+        store["state"]["gathered_contexts"] = context_summary
+
+    return "PR summary saved."
 
 
 # adding comment to context tool - takes a draft comment and adds it to the persistent context of the application
-async def add_comment_to_state(draft_comment: str):
-    """takes a draft comment and adds it to the persistent context of the application along with the current context"""
-    current_state = await ctx.store.get("state")
-    current_state["draft_comment"] = draft_comment
-    await ctx.store.set("state", current_state)
+async def add_comment_to_state(ctx: Context, draft_comment: str) -> str:
+    """Save the review draft."""
+    async with ctx.store.edit_state() as store:
+        store["state"]["draft_comment"] = draft_comment
+        # A revised draft needs validation again.
+        store["state"]["final_review"] = ""
+    return "Draft saved."
 
 
 # adding final comment to context tool - takes a finalised comment and saves it to the context of the application
-async def add_final_review_to_state(final_comment: str):
-    """Takes a final comment and adds it to the context of the application"""
-    await ctx.store.set("final_review", final_comment)
+async def add_final_review_to_state(ctx: Context, final_comment: str) -> str:
+    """Save the validated review."""
+    async with ctx.store.edit_state() as store:
+        store["state"]["final_review"] = final_comment
+    return "Final review saved."
 
 
-def post_to_github(pr_number: int, final_comment: str):
+async def post_to_github(ctx: Context, pr_number: int) -> str:
     """Takes a finalised comment (which can be retrieved from the final_review section of the Context) and submits it as a comment for the specified pull request on the GitHub repository"""
+    state = await ctx.store.get("state")
+    final_review = state.get("final_review", "").strip()
+    if not final_review:
+        return "Review not posted: no final review has been saved."
+
     pull_request = repo.get_pull(pr_number)
-    pull_request.create_review(body=final_comment)
+    pull_request.create_review(body=state["final_review"])
+    return "Review created on GitHub."
 
 
 #  --- defining agents ---
@@ -173,8 +185,6 @@ context_agent = FunctionAgent(
     system_prompt=context_instruc,
     can_handoff_to=["CommentorAgent"]
 )
-
-ctx = Context(context_agent)
 
 commentor_agent = FunctionAgent(
     llm=llm,
@@ -190,6 +200,7 @@ review_posting_agent = FunctionAgent(
     name="ReviewAndPostingAgent",
     description="takes a draft pull request review comment from the commentor agent and either sends it back for rewriting, or posts it on GitHub.",
     tools=[add_final_review_to_state, post_to_github],
+    system_prompt=review_post_instruc,
     can_handoff_to=["CommentorAgent"]
 )
 
@@ -197,9 +208,12 @@ workflow_agent = AgentWorkflow(
     agents=[context_agent, commentor_agent, review_posting_agent],
     root_agent=commentor_agent.name,
     initial_state={
+        "pr_details": {},
+        "changed_files": [],
         "gathered_contexts": "",
         "draft_comment": "",
-        "final_review": ""
+        "review_feedback": [],
+        "final_review": "",
     },
 )
 
@@ -208,9 +222,9 @@ workflow_agent = AgentWorkflow(
 
 async def main():
     query = input().strip()
-    prompt = RichPromptTemplate(query)
 
-    handler = workflow_agent.run(prompt.format())
+    ctx = Context(workflow_agent)
+    handler = workflow_agent.run(user_msg=query, ctx=ctx)
 
     current_agent = None
     async for event in handler.stream_events():
@@ -226,6 +240,8 @@ async def main():
             print(f"Output from tool: {event.tool_output}")
         elif isinstance(event, ToolCall):
             print(f"Calling selected tool: {event.tool_name}, with arguments: {event.tool_kwargs}")
+    state = await ctx.store.get("state")
+    print(state["draft_comment"])
 
 
 if __name__ == "__main__":
